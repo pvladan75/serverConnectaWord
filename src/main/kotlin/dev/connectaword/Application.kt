@@ -1,5 +1,6 @@
 package dev.connectaword
 
+import dev.connectaword.database.DatabaseFactory
 import dev.connectaword.plugins.*
 import io.ktor.server.application.*
 import io.ktor.server.engine.*
@@ -14,6 +15,9 @@ fun main() {
 }
 
 fun Application.module() {
+    // Inicijalizacija konekcije sa bazom podataka
+    DatabaseFactory.init()
+
     install(CallLogging) {
         level = Level.INFO
         filter { call -> call.request.path().startsWith("/") }
