@@ -5,7 +5,9 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class CreateRoomRequest(
     val name: String,
-    val hostId: String // Later, we'll get this from an auth token
+    val hostId: String,
+    val language: String, // Add this
+    val wordSource: String // Add this
 )
 
 @Serializable

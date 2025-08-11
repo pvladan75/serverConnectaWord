@@ -1,40 +1,50 @@
 package dev.connectaword.server
 
+import dev.connectaword.data.MakeGuess
 import io.ktor.websocket.*
 import java.util.concurrent.ConcurrentHashMap
 
-// This class holds the state for a single connection
+// This class holds the state for a single connection (no changes here)
 data class GameConnection(
     val session: WebSocketSession,
     val userId: String,
     val username: String
 )
 
-// This object will manage all active game rooms and their connections
+// This object will manage all active game rooms
 object RoomController {
-    // A thread-safe map where:
-    // Key = Room ID (String)
-    // Value = Set of connections in that room (Set<GameConnection>)
-    val rooms = ConcurrentHashMap<String, MutableSet<GameConnection>>()
+    // The map now holds Game instances instead of just connections
+    private val games = ConcurrentHashMap<String, Game>()
 
-    fun onJoin(roomId: String, userId: String, username: String, session: WebSocketSession) {
-        val room = rooms.computeIfAbsent(roomId) { ConcurrentHashMap.newKeySet() }
-        room.add(GameConnection(session, userId, username))
+    suspend fun onJoin(roomId: String, userId: String, username: String, session: WebSocketSession) {
+        // Find the game or create a new one if it doesn't exist
+        val game = games.computeIfAbsent(roomId) { Game(roomId) }
+        val connection = GameConnection(session, userId, username)
+
+        game.addPlayer(connection)
+
+        // Broadcast the new state to all players in the room
+        game.broadcastState()
     }
 
-    suspend fun broadcast(roomId: String, message: String) {
-        rooms[roomId]?.forEach { connection ->
-            connection.session.send(Frame.Text(message))
+    suspend fun onLeave(roomId: String, session: WebSocketSession) {
+        val game = games[roomId] ?: return
+
+        game.removePlayerBySession(session)
+
+        if (game.isEmpty()) {
+            games.remove(roomId)
+        } else {
+            // Broadcast the updated state (without the departed player)
+            game.broadcastState()
         }
     }
 
-    fun onLeave(roomId: String, session: WebSocketSession) {
-        val room = rooms[roomId]
-        room?.removeIf { it.session == session }
+    suspend fun onGuess(roomId: String, userId: String, session: WebSocketSession, guess: MakeGuess) {
+        val game = games[roomId]
+        // We need the username, let's find the connection object
+        val connection = game?.connections?.find { it.session == session } ?: return
 
-        // Optional: remove the room if it's empty
-        if (room?.isEmpty() == true) {
-            rooms.remove(roomId)
-        }
+        game.processGuess(connection, guess)
     }
 }

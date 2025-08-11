@@ -27,8 +27,6 @@ fun Application.configureRouting() {
             val request = call.receive<RegisterRequest>()
             application.log.info("Primljen zahtev za registraciju: Email=${request.email}")
 
-            // TODO: Check if email already exists
-
             val hashedPassword = BCrypt.hashpw(request.lozinka, BCrypt.gensalt())
             val userId = UUID.randomUUID().toString()
 
@@ -110,6 +108,8 @@ fun Application.configureRouting() {
                     it[id] = roomId
                     it[name] = request.name
                     it[hostId] = request.hostId
+                    it[language] = request.language
+                    it[wordSource] = request.wordSource
                 }
             }
             call.respond(HttpStatusCode.Created, mapOf("message" to "Room created successfully", "roomId" to roomId))
