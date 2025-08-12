@@ -10,6 +10,7 @@ import io.ktor.server.routing.*
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.mindrot.jbcrypt.BCrypt
+import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.*
 
@@ -102,17 +103,29 @@ fun Application.configureRouting() {
         post("/create-room") {
             val request = call.receive<CreateRoomRequest>()
             val roomId = UUID.randomUUID().toString()
+            val roomCreatedAt = Instant.now() // Record the creation time
 
-            DatabaseFactory.dbQuery {
+            // Perform the database insert and create the response object in one transaction
+            val newRoom = DatabaseFactory.dbQuery {
                 GameRooms.insert {
                     it[id] = roomId
                     it[name] = request.name
                     it[hostId] = request.hostId
                     it[language] = request.language
                     it[wordSource] = request.wordSource
+                    it[createdAt] = roomCreatedAt
                 }
+
+                // Create the response object to send back to the client
+                RoomResponse(
+                    id = roomId,
+                    name = request.name,
+                    hostId = request.hostId,
+                    createdAt = DateTimeFormatter.ISO_INSTANT.format(roomCreatedAt)
+                )
             }
-            call.respond(HttpStatusCode.Created, mapOf("message" to "Room created successfully", "roomId" to roomId))
+
+            call.respond(HttpStatusCode.Created, newRoom)
         }
     }
 }

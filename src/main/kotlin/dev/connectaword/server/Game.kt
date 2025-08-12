@@ -1,33 +1,46 @@
 package dev.connectaword.server
 
-import dev.connectaword.data.GameState
-import dev.connectaword.data.MakeGuess
-import dev.connectaword.data.PlayerData
+import dev.connectaword.data.*
 import io.ktor.websocket.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-class Game(private val roomId: String) {
+class Game(
+    private val roomId: String,
+    private val roomLanguage: String,
+    val hostId: String
+) {
 
-    // A simple list of words for now. Later, this will come from the database.
-    private val words = listOf("KTOR", "KOTLIN", "SERVER", "ANDROID", "COMPOSE")
     val connections = mutableSetOf<GameConnection>()
 
-    private val _gameState = MutableStateFlow(
-        GameState(
-            wordToGuess = words.random(),
-            pattern = "", // Will be initialized when the game starts
-            remainingGuesses = 10,
-            players = emptyList()
-        )
-    )
+    private val _gameState = MutableStateFlow(GameState(
+        wordToGuess = "",
+        pattern = "",
+        remainingGuesses = 10,
+        players = emptyList(),
+        hostId = this.hostId, // Попуњавамо hostId
+        status = "WAITING" // Почетни статус
+    ))
 
-    init {
-        // Initialize the pattern for the first word
+    fun startGame() {
+        val newWord = WordRepository.getRandomWord(roomLanguage)
+
+        if (newWord == null) {
+            println("ERROR: Could not get a word for language '$roomLanguage'. Game cannot start.")
+            return
+        }
+
         _gameState.update {
-            it.copy(pattern = "_ ".repeat(it.wordToGuess.length).trim())
+            it.copy(
+                wordToGuess = newWord,
+                pattern = "_ ".repeat(newWord.length).trim(),
+                remainingGuesses = 10,
+                isGameOver = false,
+                players = it.players,
+                status = "IN_PROGRESS" // Мењамо статус
+            )
         }
     }
 
@@ -39,7 +52,6 @@ class Game(private val roomId: String) {
         }
     }
 
-    // This function now accepts the session to find the player to remove
     fun removePlayerBySession(session: WebSocketSession) {
         val playerToRemove = connections.find { it.session == session }
         if (playerToRemove != null) {
@@ -50,31 +62,60 @@ class Game(private val roomId: String) {
         }
     }
 
-    // A helper to check if the game is empty
     fun isEmpty(): Boolean {
         return connections.isEmpty()
     }
 
-    suspend fun processGuess(fromPlayer: GameConnection, guess: MakeGuess) {
-        // TODO: Implement guess validation logic here
+    suspend fun processGuess(fromPlayer: GameConnection, guessAction: MakeGuess) {
+        val guess = guessAction.guess.uppercase()
+        val currentState = _gameState.value
 
-        // For now, just broadcast the guess as a simple message
-        val message = "[${fromPlayer.username} guessed]: ${guess.guess}"
-        connections.forEach {
-            it.session.send(Frame.Text(message))
+        if (currentState.isGameOver || currentState.status != "IN_PROGRESS") return
+
+        if (guess.length != currentState.wordToGuess.length) {
+            val errorMessage = Announcement("Guess must have ${currentState.wordToGuess.length} letters.")
+            val errorJson = Json.encodeToString(errorMessage as GameMessage)
+            fromPlayer.session.send(Frame.Text(errorJson))
+            return
         }
 
-        // After processing, you would update the game state and broadcast it
-        // broadcastState()
+        val newPattern = StringBuilder(currentState.pattern.replace(" ", ""))
+        var correctGuess = false
+
+        for (i in currentState.wordToGuess.indices) {
+            if (currentState.wordToGuess[i] == guess[i]) {
+                newPattern[i] = guess[i]
+                correctGuess = true
+            }
+        }
+
+        _gameState.update {
+            it.copy(
+                pattern = newPattern.toString().chunked(1).joinToString(" "),
+                remainingGuesses = if (!correctGuess) it.remainingGuesses - 1 else it.remainingGuesses
+            )
+        }
+
+        val updatedState = _gameState.value
+        if (updatedState.pattern.replace(" ", "") == updatedState.wordToGuess || updatedState.remainingGuesses <= 0) {
+            _gameState.update { it.copy(isGameOver = true, status = "FINISHED") }
+        }
+
+        broadcastState()
     }
 
     suspend fun broadcastState() {
-        // We will improve this to send a structured GameStateUpdate message later
-        val stateJson = Json.encodeToString(_gameState.value)
+        val clientState = if (_gameState.value.isGameOver) {
+            _gameState.value
+        } else {
+            _gameState.value.copy(wordToGuess = "")
+        }
+
+        val stateUpdateMessage = GameStateUpdate(clientState)
+        val stateJson = Json.encodeToString(stateUpdateMessage as GameMessage)
+
         connections.forEach {
-            // it.session.send(Frame.Text(stateJson))
-            val playerNames = _gameState.value.players.joinToString(", ") { it.username }
-            it.session.send(Frame.Text("Welcome! Players in room: $playerNames"))
+            it.session.send(Frame.Text(stateJson))
         }
     }
 }
