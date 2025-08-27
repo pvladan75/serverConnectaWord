@@ -2,7 +2,7 @@
 kotlin = "2.1.10"
 ktor = "3.2.3"
 logback = "1.5.13"
-exposed = "0.49.0"
+exposed = "0.52.0"
 postgresql = "42.7.2"
 jbcrypt = "0.4"
 

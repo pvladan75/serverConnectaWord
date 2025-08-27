@@ -2,35 +2,42 @@ package dev.connectaword.data
 
 import kotlinx.serialization.Serializable
 
-@Serializable
 sealed interface GameMessage
-
-@Serializable
-data class MakeGuess(val guess: String) : GameMessage
-
-@Serializable
 data class StartGame(val action: String = "start") : GameMessage
-
-@Serializable
+data class MakeGuess(val guess: String, val action: String = "guess") : GameMessage
+data class SurrenderRound(val action: String = "surrender") : GameMessage
+data class PlayAgain(val action: String = "play_again") : GameMessage
 data class GameStateUpdate(val gameState: GameState) : GameMessage
-
-@Serializable
 data class Announcement(val message: String) : GameMessage
 
+// Помоћна класа за лакше парсирање на серверу
 @Serializable
-data class GameState(
-    val wordToGuess: String,
+data class BaseAction(val action: String)
+
+@Serializable
+data class PlayerProgress(
     val pattern: String,
-    val remainingGuesses: Int,
-    val players: List<PlayerData>,
-    val isGameOver: Boolean = false,
-    val hostId: String = "", // Додато
-    val status: String = "WAITING" // Додато (може бити "WAITING", "IN_PROGRESS", "FINISHED")
+    val previousGuesses: List<String>,
+    val commonLetters: Set<Char>,
+    val remainingAttempts: Int,
+    val isWordFinished: Boolean
 )
 
 @Serializable
 data class PlayerData(
     val id: String,
     val username: String,
-    val score: Int
+    val rating: Int,
+    val totalScore: Int,
+    val currentWordIndex: Int,
+    val progress: PlayerProgress?,
+    val isGameFinished: Boolean
+)
+
+@Serializable
+data class GameState(
+    val gameStatus: String,
+    val players: List<PlayerData>,
+    val hostId: String,
+    val finalWords: List<String>? = null
 )

@@ -23,6 +23,7 @@ dependencies {
     implementation(libs.exposed.dao)
     implementation(libs.exposed.jdbc)
     implementation(libs.exposed.java.time)
+    implementation("io.ktor:ktor-server-auth-jwt-jvm:3.2.3")
     implementation(libs.postgresql.jdbc)
     implementation(libs.jbcrypt)
     implementation(libs.logback.classic)

@@ -43,10 +43,13 @@ fun Application.configureRouting() {
             val newUser = User(
                 id = userId,
                 korisnickoIme = request.korisnickoIme,
-                email = request.email
+                email = request.email,
+                rating = 1500 // Почетни рејтинг
             )
+
+            val token = TokenManager.generateToken(userId)
             val response = AuthResponse(
-                token = "dummy-jwt-token-for-${request.korisnickoIme}",
+                token = token,
                 korisnik = newUser
             )
             call.respond(HttpStatusCode.OK, response)
@@ -56,26 +59,27 @@ fun Application.configureRouting() {
             val request = call.receive<LoginRequest>()
             application.log.info("Primljen zahtev za prijavu: Email=${request.email}")
 
-            val userRow = DatabaseFactory.dbQuery {
-                Users.selectAll().where { Users.email eq request.email }.singleOrNull()
-            }
+            val userRow = userDao.findUserByEmail(request.email)
 
             if (userRow == null) {
                 call.respond(HttpStatusCode.BadRequest, "Pogrešan email ili lozinka.")
                 return@post
             }
 
-            val storedHashedPassword = userRow[Users.lozinka]
+            val storedHashedPassword = userDao.getPasswordForUser(request.email) ?: ""
             val passwordMatches = BCrypt.checkpw(request.lozinka, storedHashedPassword)
 
             if (passwordMatches) {
                 val user = User(
-                    id = userRow[Users.id],
-                    korisnickoIme = userRow[Users.korisnickoIme],
-                    email = userRow[Users.email]
+                    id = userRow.id,
+                    korisnickoIme = userRow.korisnickoIme,
+                    email = userRow.email,
+                    rating = userRow.rating
                 )
+
+                val token = TokenManager.generateToken(user.id)
                 val response = AuthResponse(
-                    token = "dummy-jwt-token-for-${user.email}",
+                    token = token,
                     korisnik = user
                 )
                 call.respond(HttpStatusCode.OK, response)
@@ -88,25 +92,58 @@ fun Application.configureRouting() {
 
         get("/rooms") {
             val rooms = DatabaseFactory.dbQuery {
-                GameRooms.selectAll().map {
-                    RoomResponse(
-                        id = it[GameRooms.id],
-                        name = it[GameRooms.name],
-                        hostId = it[GameRooms.hostId],
-                        createdAt = DateTimeFormatter.ISO_INSTANT.format(it[GameRooms.createdAt])
+                GameRooms.innerJoin(Users)
+                    .select(
+                        GameRooms.id,
+                        GameRooms.name,
+                        GameRooms.hostId,
+                        Users.korisnickoIme,
+                        Users.rating,
+                        GameRooms.language,
+                        GameRooms.wordSource,
+                        GameRooms.createdAt
                     )
-                }
+                    .map {
+                        val originalName = it[GameRooms.name]
+                        val language = it[GameRooms.language]
+                        val hostUsername = it[Users.korisnickoIme]
+                        val wordSource = it[GameRooms.wordSource]
+                        val wordSourceDisplay = if (wordSource == "SERVER") "Serverske reči" else "Igračke reči"
+
+                        val formattedName = "$originalName [$language] - Host: $hostUsername ($wordSourceDisplay)"
+
+                        RoomResponse(
+                            id = it[GameRooms.id],
+                            name = formattedName,
+                            hostId = it[GameRooms.hostId],
+                            hostUsername = it[Users.korisnickoIme],
+                            hostRating = it[Users.rating],
+                            language = language,
+                            wordSource = wordSource,
+                            createdAt = DateTimeFormatter.ISO_INSTANT.format(it[GameRooms.createdAt])
+                        )
+                    }
             }
             call.respond(HttpStatusCode.OK, rooms)
         }
 
         post("/create-room") {
             val request = call.receive<CreateRoomRequest>()
-            val roomId = UUID.randomUUID().toString()
-            val roomCreatedAt = Instant.now() // Record the creation time
 
-            // Perform the database insert and create the response object in one transaction
-            val newRoom = DatabaseFactory.dbQuery {
+            val existingRoom = DatabaseFactory.dbQuery {
+                // ISPRAVKA #2: Korišćenje .selectAll().where{...} umesto .selectWhere{...}
+                GameRooms.selectAll().where { GameRooms.hostId eq request.hostId }.singleOrNull()
+            }
+
+            if (existingRoom != null) {
+                call.respond(HttpStatusCode.Conflict, "You already have an active room.")
+                return@post
+            }
+
+            val roomId = UUID.randomUUID().toString()
+            val roomCreatedAt = Instant.now()
+
+            val newRoomResponse = DatabaseFactory.dbQuery {
                 GameRooms.insert {
                     it[id] = roomId
                     it[name] = request.name
@@ -116,16 +153,30 @@ fun Application.configureRouting() {
                     it[createdAt] = roomCreatedAt
                 }
 
-                // Create the response object to send back to the client
+                // ISPRAVKA #2: Korišćenje .selectAll().where{...} umesto .selectWhere{...}
+                val host = Users.selectAll().where { Users.id eq request.hostId }.single()
+
+                val originalName = request.name
+                val language = request.language
+                val hostUsername = host[Users.korisnickoIme]
+                val wordSource = request.wordSource
+                val wordSourceDisplay = if (wordSource == "SERVER") "Serverske reči" else "Igračke reči"
+
+                val formattedName = "$originalName [$language] - Host: $hostUsername ($wordSourceDisplay)"
+
                 RoomResponse(
                     id = roomId,
-                    name = request.name,
+                    name = formattedName,
                     hostId = request.hostId,
+                    hostUsername = hostUsername,
+                    hostRating = host[Users.rating],
+                    language = language,
+                    wordSource = wordSource,
                     createdAt = DateTimeFormatter.ISO_INSTANT.format(roomCreatedAt)
                 )
             }
 
-            call.respond(HttpStatusCode.Created, newRoom)
+            call.respond(HttpStatusCode.Created, newRoomResponse)
         }
     }
 }

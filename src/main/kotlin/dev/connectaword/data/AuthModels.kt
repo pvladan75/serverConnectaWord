@@ -26,5 +26,6 @@ data class AuthResponse(
 data class User(
     val id: String,
     val korisnickoIme: String,
-    val email: String
+    val email: String,
+    val rating: Int
 )
